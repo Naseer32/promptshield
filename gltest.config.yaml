@@ -1,0 +1,17 @@
+# gltest.config.yaml — Veritas
+# Targets Studio Dev (same network Arbiter deploys to successfully),
+# chain id 61997.
+
+networks:
+  studio_devnet:
+    rpc_url: https://studio-dev.genlayer.com/api
+    chain_id: 61997
+    explorer_url: https://explorer-studio-dev.genlayer.com
+
+default_network: studio_devnet
+
+# If you later need Studio Next instead, add:
+# networks:
+#   studio_next:
+#     rpc_url: https://studio-next.genlayer.com/api
+#     chain_id: 61997
