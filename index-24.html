@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PromptShield</title>
+<style>
+:root{--bg:#070b14;--panel:#0d1424;--line:#1c2942;--text:#e6edf7;--mut:#8493ad;--cy:#22d3ee;--ok:#34d399;--warn:#fbbf24;--bad:#f87171}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+h1{font-size:19px;margin:0;letter-spacing:.2px} h1 span{color:var(--cy)}
+h2{font-size:17px;margin:0 0 10px} .mut{color:var(--mut)} .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;word-break:break-all}
+nav{display:flex;gap:4px;overflow-x:auto;padding:8px 14px;border-bottom:1px solid var(--line)}
+nav button{background:none;border:0;color:var(--mut);padding:8px 13px;border-radius:8px;font:inherit;cursor:pointer;white-space:nowrap}
+nav button.on{color:var(--cy);background:#0f2233}
+main{max-width:960px;margin:0 auto;padding:18px 14px 60px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.stat b{display:block;font-size:26px}
+textarea,input,select{width:100%;background:#0a1120;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit}
+textarea{min-height:150px;resize:vertical} textarea:focus,input:focus,select:focus,button:focus-visible{outline:2px solid var(--cy);outline-offset:1px}
+.btn{background:var(--cy);color:#04202a;border:0;border-radius:8px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
+.btn.ghost{background:none;color:var(--cy);border:1px solid var(--cy)} .btn:disabled{opacity:.5;cursor:wait}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 0}
+.b{padding:2px 10px;border-radius:99px;font-weight:700;font-size:13px}
+.ALLOW{background:#0b2f25;color:var(--ok)} .REVIEW{background:#3a2d08;color:var(--warn)} .BLOCK{background:#3b1414;color:var(--bad)}
+.verdict{border-left:4px solid var(--cy)} .verdict.BLOCK{border-left-color:var(--bad)} .verdict.ALLOW{border-left-color:var(--ok)} .verdict.REVIEW{border-left-color:var(--warn)}
+.big{font-size:30px;font-weight:700;margin-right:6px}
+dl{display:grid;grid-template-columns:130px 1fr;gap:6px 12px;margin:10px 0} dt{color:var(--mut)} dd{margin:0}
+.bar{display:flex;align-items:center;gap:8px;margin:6px 0}.bar i{display:block;height:10px;background:var(--cy);border-radius:5px;min-width:2px}
+.err{color:var(--bad)} .note{color:var(--warn);font-size:13px}
+details{border-top:1px solid var(--line);padding:8px 0} summary{cursor:pointer}
+pre{background:#0a1120;border:1px solid var(--line);border-radius:8px;padding:10px;overflow-x:auto;font-size:12.5px}
+@media(max-width:520px){dl{grid-template-columns:1fr}dt{margin-top:6px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Prompt<span>Shield</span></h1>
+  <div class="row" style="margin:0"><span id="wallet" class="mut mono">Wallet not connected</span><button class="btn ghost" id="connect">Connect wallet</button></div>
+</header>
+<nav id="nav"></nav>
+<main id="view"></main>
+
+<script type="module">
+import { createClient } from "https://esm.sh/genlayer-js";
+import { testnetBradbury } from "https://esm.sh/genlayer-js/chains";
+import { TransactionStatus } from "https://esm.sh/genlayer-js/types";
+
+// ---- Configuration ----
+const CONTRACT = "0xb54ab4C63fE0722C3D1A0026aaF074537Bfe8E16";
+const NETWORK = "GenLayer Bradbury testnet";
+const BATCH = 10;
+
+// ---- Helpers ----
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const plain = v => v instanceof Map ? Object.fromEntries([...v].map(([k, x]) => [k, plain(x)]))
+  : typeof v === "bigint" ? Number(v) : Array.isArray(v) ? v.map(plain)
+  : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plain(x)])) : v;
+const sha = async t => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t)))].map(b => b.toString(16).padStart(2, "0")).join("");
+const nice = e => (e?.code === 4001 || /reject|denied/i.test(e?.message || "")) ? "You rejected the transaction in your wallet." : (e?.shortMessage || e?.message || String(e));
+
+const readClient = createClient({ chain: testnetBradbury });
+let account = null, writeClient = null;
+const read = async (fn, args = []) => plain(await readClient.readContract({ address: CONTRACT, functionName: fn, args }));
+
+async function connect() {
+  if (!window.ethereum) throw new Error("No wallet found. Open this page inside the MetaMask app browser.");
+  const [addr] = await window.ethereum.request({ method: "eth_requestAccounts" });
+  account = addr;
+  writeClient = createClient({ chain: testnetBradbury, account: addr });
+  // Optional helper to add/switch the network; skipped silently if this SDK version lacks it.
+  if (typeof writeClient.connect === "function") { try { await writeClient.connect("testnetBradbury"); } catch {} }
+  $("#wallet").textContent = addr.slice(0, 8) + "…" + addr.slice(-6);
+  $("#connect").textContent = "Connected";
+}
+$("#connect").onclick = () => connect().catch(e => alert(nice(e)));
+
+async function write(fn, args, stage) {
+  if (!writeClient) await connect();
+  stage("Confirm the transaction in your wallet…");
+  const hash = await writeClient.writeContract({ address: CONTRACT, functionName: fn, args, value: 0n });
+  stage(`Submitted (${hash.slice(0, 10)}…). Validators are reaching consensus, this can take a few minutes…`);
+  await writeClient.waitForTransactionReceipt({ hash, status: TransactionStatus.ACCEPTED, retries: 120, interval: 5000 });
+  return hash;
+}
+
+// Find the verdict we just created: same requester and same input hash, among the newest records.
+async function findMine(inputHash) {
+  const n = Number(await read("get_analysis_count"));
+  for (let id = n; id > Math.max(0, n - 15); id--) {
+    const r = await read("get_analysis", [id]);
+    if (r.input_sha256 === inputHash && String(r.requester).toLowerCase() === account.toLowerCase()) return r;
+  }
+  return null;
+}
+
+// ---- Shared UI ----
+const badge = d => `<span class="b ${esc(d)}">${esc(d)}</span>`;
+function recordHTML(r, open) {
+  const x = r.result || {}, s = x.static || {}, a = x.ai || {};
+  return `<dl>
+    <dt>Attack type</dt><dd>${esc(x.attack_type)}</dd>
+    <dt>Confidence</dt><dd>${esc(x.confidence)}%</dd>
+    <dt>Explanation</dt><dd>${esc(x.reason)}</dd>
+    <dt>Static scan</dt><dd>${esc(s.risk_level)} (${esc(s.hits)} rule matches)</dd>
+    <dt>AI assessment</dt><dd>${esc(a.risk_level)} / ${esc(a.decision)}</dd>
+    <dt>Requester</dt><dd class="mono">${esc(r.requester)}</dd>
+    <dt>Input SHA-256</dt><dd class="mono">${esc(r.input_sha256)}</dd></dl>
+    <details${open ? " open" : ""}><summary>Raw JSON</summary><pre>${esc(JSON.stringify(r, null, 2))}</pre></details>`;
+}
+let lastShown = null;
+function verdictHTML(r) {
+  lastShown = r; const x = r.result || {};
+  return `<div class="card verdict ${esc(x.decision)}">
+    <div class="row"><span class="big">${esc(x.decision)}</span>${badge(x.risk_level === "SAFE" ? "ALLOW" : x.decision)}<span class="mut">risk ${esc(x.risk_level)} · analysis #${esc(r.analysis_id)}</span></div>
+    ${recordHTML(r, false)}
+    <button class="btn ghost" id="copy">Copy as JSON</button>
+    <p class="note">ALLOW means no attack was detected. It is not a guarantee that the input is safe.</p></div>`;
+}
+document.addEventListener("click", e => {
+  if (e.target.id === "copy" && lastShown) navigator.clipboard.writeText(JSON.stringify(lastShown, null, 2)).then(() => e.target.textContent = "Copied");
+});
+
+async function runWrite(btn, status, out, fn, args, hashSource) {
+  btn.disabled = true; out.innerHTML = ""; status.className = "mut";
+  try {
+    const h = await sha(hashSource);
+    await write(fn, args, m => status.textContent = m);
+    status.textContent = "Accepted. Reading the stored verdict…";
+    const r = await findMine(h);
+    if (!r) throw new Error("Transaction accepted, but the verdict was not found yet. Open History and refresh in a moment.");
+    status.textContent = "Done. The verdict is final after the network's finalization window.";
+    out.innerHTML = verdictHTML(r);
+    hist = []; // refresh history next time
+  } catch (e) { status.className = "err"; status.textContent = nice(e); }
+  btn.disabled = false;
+}
+
+// ---- History state ----
+let hist = [], total = 0;
+async function loadMore() {
+  total = Number(await read("get_analysis_count"));
+  const from = total - hist.length;
+  const ids = Array.from({ length: Math.min(BATCH, Math.max(0, from)) }, (_, i) => from - i);
+  const recs = await Promise.all(ids.map(id => read("get_analysis", [id]).catch(() => null)));
+  hist.push(...recs.filter(Boolean));
+}
+
+// ---- Views ----
+const views = {
+  async overview(el) {
+    el.innerHTML = `<p class="mut">Loading from the contract…</p>`;
+    if (!hist.length) await loadMore(); else total = Number(await read("get_analysis_count"));
+    const c = d => hist.filter(r => r.result?.decision === d).length;
+    const lv = ["SAFE", "LOW", "MEDIUM", "HIGH", "CRITICAL"].map(l => [l, hist.filter(r => r.result?.risk_level === l).length]);
+    const mx = Math.max(1, ...lv.map(x => x[1]));
+    el.innerHTML = `<div class="grid">
+      <div class="stat"><b>${total}</b><span class="mut">Total analyses</span></div>
+      <div class="stat"><b>${c("ALLOW")}</b><span class="mut">Allowed</span></div>
+      <div class="stat"><b>${c("BLOCK")}</b><span class="mut">Blocked</span></div>
+      <div class="stat"><b>${c("REVIEW")}</b><span class="mut">Need review</span></div></div>
+      <p class="mut">Decision counts cover the ${hist.length} most recent records loaded. Open History to load more.</p>
+      <div class="card"><h2>Risk levels (loaded records)</h2>${lv.map(([l, n]) => `<div class="bar"><span style="width:76px">${l}</span><i style="width:${n / mx * 60}%"></i><span>${n}</span></div>`).join("")}</div>
+      <div class="card"><h2>Network</h2><dl><dt>Network</dt><dd>${NETWORK}</dd><dt>Contract</dt><dd class="mono">${CONTRACT}</dd><dt>Wallet</dt><dd class="mono">${esc(account || "Not connected (reading works without a wallet)")}</dd></dl></div>`;
+  },
+  scanner(el) {
+    el.innerHTML = `<div class="card"><h2>Prompt scanner</h2>
+      <p class="mut">Paste untrusted text. The contract checks it for injection, role hijacking, prompt extraction, tool abuse and data exfiltration.</p>
+      <textarea id="inp" maxlength="12000" placeholder="Text to analyze"></textarea>
+      <div class="row"><button class="btn" id="go">Analyze prompt</button><span class="mut" id="cnt">0 / 12000</span></div>
+      <div id="st" class="mut"></div></div><div id="out"></div>`;
+    $("#inp").oninput = e => $("#cnt").textContent = e.target.value.length + " / 12000";
+    $("#go").onclick = () => {
+      const t = $("#inp").value;
+      if (!t.trim()) { $("#st").className = "err"; $("#st").textContent = "Enter some text first."; return; }
+      runWrite($("#go"), $("#st"), $("#out"), "analyze_prompt", [t], t);
+    };
+  },
+  guard(el) {
+    el.innerHTML = `<div class="card"><h2>Agent action guard</h2>
+      <p class="mut">Check that what an agent wants to do matches the task it was given.</p>
+      <label>Original task</label><textarea id="task" maxlength="12000" style="min-height:90px" placeholder="Book a flight to Lagos"></textarea>
+      <label>Proposed action</label><textarea id="act" maxlength="12000" style="min-height:90px" placeholder="Search flights to Lagos on 12 Dec"></textarea>
+      <div class="row"><button class="btn" id="go">Verify action</button></div>
+      <div id="st" class="mut"></div></div><div id="out"></div>`;
+    $("#go").onclick = () => {
+      const t = $("#task").value, a = $("#act").value;
+      if (!t.trim() || !a.trim()) { $("#st").className = "err"; $("#st").textContent = "Fill in both fields."; return; }
+      runWrite($("#go"), $("#st"), $("#out"), "verify_agent_action", [t, a], t + "\n---\n" + a);
+    };
+  },
+  async history(el) {
+    el.innerHTML = `<div class="card"><h2>Analysis history</h2>
+      <div class="row"><input id="q" placeholder="Search id, address, hash or attack type" style="flex:2;min-width:180px">
+      <select id="f" style="flex:1;min-width:120px"><option value="">All decisions</option><option>ALLOW</option><option>REVIEW</option><option>BLOCK</option></select>
+      <button class="btn ghost" id="ref">Refresh</button></div><div id="st" class="mut"></div></div>
+      <div id="list"></div><div class="row"><button class="btn ghost" id="more">Load more</button></div>`;
+    const draw = () => {
+      const q = $("#q").value.toLowerCase(), f = $("#f").value;
+      const rows = hist.filter(r => (!f || r.result?.decision === f) &&
+        (!q || [r.analysis_id, r.requester, r.input_sha256, r.result?.attack_type].join(" ").toLowerCase().includes(q)));
+      $("#list").innerHTML = rows.length ? rows.map(r => `<div class="card"><div class="row" style="margin:0">${badge(r.result?.decision)}<b>#${esc(r.analysis_id)}</b><span class="mut">${esc(r.result?.risk_level)} · ${esc(r.result?.attack_type)}</span></div>
+        <details><summary>Details</summary>${recordHTML(r, false)}</details></div>`).join("")
+        : `<p class="mut">${total ? "No records match. Try loading more." : "No analyses yet. Run the scanner first."}</p>`;
+      $("#st").textContent = `Showing ${rows.length} of ${hist.length} loaded (${total} on-chain).`;
+      $("#more").disabled = hist.length >= total;
+    };
+    const load = async fn => { try { $("#st").className = "mut"; $("#st").textContent = "Loading…"; await fn(); } catch (e) { $("#st").className = "err"; $("#st").textContent = nice(e); } draw(); };
+    $("#q").oninput = draw; $("#f").onchange = draw;
+    $("#more").onclick = () => load(loadMore);
+    $("#ref").onclick = () => { hist = []; load(loadMore); };
+    load(async () => { if (!hist.length) await loadMore(); else total = Number(await read("get_analysis_count")); });
+  },
+  async threat(el) {
+    el.innerHTML = `<div class="card"><h2>Threat feed</h2><p class="mut">An optional web page the contract reads at analysis time to learn about current attack techniques.</p>
+      <p>Current URL: <span class="mono" id="cur">loading…</span></p>
+      <input id="url" placeholder="https://example.com/threats.txt">
+      <div class="row"><button class="btn" id="set">Update feed</button></div><div id="st" class="mut"></div>
+      <p class="note">The contract has no owner lookup, so this page cannot verify ownership. Only the contract owner's transaction will succeed; others are rejected on-chain.</p></div>`;
+    try { $("#cur").textContent = (await read("get_threat_feed")) || "(none set)"; } catch (e) { $("#cur").textContent = nice(e); }
+    $("#set").onclick = async () => {
+      const st = $("#st"); st.className = "mut";
+      let u; try { u = new URL($("#url").value.trim()); if (u.protocol !== "https:") throw 0; } catch { st.className = "err"; st.textContent = "Enter a valid https:// URL."; return; }
+      $("#set").disabled = true;
+      try { await write("set_threat_feed", [u.href], m => st.textContent = m); st.textContent = "Updated."; $("#cur").textContent = u.href; }
+      catch (e) { st.className = "err"; st.textContent = nice(e); }
+      $("#set").disabled = false;
+    };
+  },
+  guide(el) {
+    el.innerHTML = `<div class="card"><h2>Developer guide</h2>
+      <dl><dt>analyze_prompt(user_input)</dt><dd>Write. Checks untrusted text and stores a verdict. Max 12,000 characters.</dd>
+      <dt>verify_agent_action(original_task, proposed_action)</dt><dd>Write. Checks that an action matches its task.</dd>
+      <dt>get_analysis(analysis_id)</dt><dd>Read. Stored verdict, requester and input hash.</dd>
+      <dt>is_allowed(analysis_id)</dt><dd>Read. True only when the decision is ALLOW. Other contracts can gate payments or tool calls on it.</dd>
+      <dt>get_analysis_count()</dt><dd>Read. Number of stored verdicts.</dd>
+      <dt>get_threat_feed() / set_threat_feed(url)</dt><dd>Read / owner-only write.</dd></dl>
+      <p>Each verdict merges deterministic static rules with an AI assessment agreed by validators. The stricter result wins.</p>
+      <pre>${esc(`import { createClient } from "genlayer-js";
+import { testnetBradbury } from "genlayer-js/chains";
+import { TransactionStatus } from "genlayer-js/types";
+
+const client = createClient({ chain: testnetBradbury, account });
+const hash = await client.writeContract({
+  address: "${CONTRACT}",
+  functionName: "analyze_prompt",
+  args: ["text to check"],
+  value: 0n,
+});
+await client.waitForTransactionReceipt({ hash, status: TransactionStatus.ACCEPTED });
+
+const ok = await client.readContract({
+  address: "${CONTRACT}",
+  functionName: "is_allowed",
+  args: [analysisId],
+});`)}</pre>
+      <p class="note">A transaction is readable once accepted, and final after the finalization window.</p></div>`;
+  },
+};
+
+const tabs = [["overview", "Overview"], ["scanner", "Prompt scanner"], ["guard", "Action guard"], ["history", "History"], ["threat", "Threat feed"], ["guide", "Developer guide"]];
+function show(name) {
+  $("#nav").innerHTML = tabs.map(([k, l]) => `<button data-k="${k}" class="${k === name ? "on" : ""}">${l}</button>`).join("");
+  $("#nav").querySelectorAll("button").forEach(b => b.onclick = () => show(b.dataset.k));
+  location.hash = name;
+  Promise.resolve(views[name]($("#view"))).catch(e => $("#view").innerHTML = `<p class="err">${esc(nice(e))}</p>`);
+}
+show(views[location.hash.slice(1)] ? location.hash.slice(1) : "overview");
+</script>
+</body>
+</html>
