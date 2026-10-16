@@ -68,7 +68,7 @@ const nice = e => (e?.code === 4001 || /reject|denied/i.test(e?.message || "")) 
 
 const readClient = createClient({ chain: testnetBradbury });
 let account = null, writeClient = null;
-const read = async (fn, args = []) => plain(await readClient.readContract({ address: CONTRACT, functionName: fn, args }));
+const read = async (fn, args = []) => plain(await readClient.readContract({ address: CONTRACT, functionName: fn, args, stateStatus: "accepted" }));
 
 async function connect() {
   if (!window.ethereum) throw new Error("No wallet found. Open this page inside the MetaMask app browser.");
