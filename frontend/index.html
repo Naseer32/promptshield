@@ -119,7 +119,7 @@ let lastShown = null;
 function verdictHTML(r) {
   lastShown = r; const x = r.result || {};
   return `<div class="card verdict ${esc(x.decision)}">
-    <div class="row"><span class="big">${esc(x.decision)}</span>${badge(x.risk_level === "SAFE" ? "ALLOW" : x.decision)}<span class="mut">risk ${esc(x.risk_level)} · analysis #${esc(r.analysis_id)}</span></div>
+    <div class="row"><span class="big">${esc(x.decision)}</span><span class="mut">risk ${esc(x.risk_level)} · analysis #${esc(r.analysis_id)}</span></div>
     ${recordHTML(r, false)}
     <button class="btn ghost" id="copy">Copy as JSON</button>
     <p class="note">ALLOW means no attack was detected. It is not a guarantee that the input is safe.</p></div>`;
@@ -135,7 +135,7 @@ async function runWrite(btn, status, out, fn, args, hashSource) {
     await write(fn, args, m => status.textContent = m);
     status.textContent = "Accepted. Reading the stored verdict…";
     const r = await findMine(h);
-    if (!r) throw new Error("Transaction accepted, but the verdict was not found yet. Open History and refresh in a moment.");
+    if (!r) throw new Error("No verdict was stored. The transaction most likely ended in a leader timeout (the AI took too long). Please try again.");
     status.textContent = "Done. The verdict is final after the network's finalization window.";
     out.innerHTML = verdictHTML(r);
     hist = []; // refresh history next time
@@ -173,10 +173,10 @@ const views = {
   scanner(el) {
     el.innerHTML = `<div class="card"><h2>Prompt scanner</h2>
       <p class="mut">Paste untrusted text. The contract checks it for injection, role hijacking, prompt extraction, tool abuse and data exfiltration.</p>
-      <textarea id="inp" maxlength="12000" placeholder="Text to analyze"></textarea>
-      <div class="row"><button class="btn" id="go">Analyze prompt</button><span class="mut" id="cnt">0 / 12000</span></div>
+      <textarea id="inp" maxlength="1200" placeholder="Text to analyze"></textarea>
+      <div class="row"><button class="btn" id="go">Analyze prompt</button><span class="mut" id="cnt">0 / 1200</span></div>
       <div id="st" class="mut"></div></div><div id="out"></div>`;
-    $("#inp").oninput = e => $("#cnt").textContent = e.target.value.length + " / 12000";
+    $("#inp").oninput = e => $("#cnt").textContent = e.target.value.length + " / 1200";
     $("#go").onclick = () => {
       const t = $("#inp").value;
       if (!t.trim()) { $("#st").className = "err"; $("#st").textContent = "Enter some text first."; return; }
@@ -186,8 +186,8 @@ const views = {
   guard(el) {
     el.innerHTML = `<div class="card"><h2>Agent action guard</h2>
       <p class="mut">Check that what an agent wants to do matches the task it was given.</p>
-      <label>Original task</label><textarea id="task" maxlength="12000" style="min-height:90px" placeholder="Book a flight to Lagos"></textarea>
-      <label>Proposed action</label><textarea id="act" maxlength="12000" style="min-height:90px" placeholder="Search flights to Lagos on 12 Dec"></textarea>
+      <label>Original task</label><textarea id="task" maxlength="1200" style="min-height:90px" placeholder="Book a flight to Lagos"></textarea>
+      <label>Proposed action</label><textarea id="act" maxlength="1200" style="min-height:90px" placeholder="Search flights to Lagos on 12 Dec"></textarea>
       <div class="row"><button class="btn" id="go">Verify action</button></div>
       <div id="st" class="mut"></div></div><div id="out"></div>`;
     $("#go").onclick = () => {
