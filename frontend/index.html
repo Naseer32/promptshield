@@ -12,6 +12,8 @@ header{display:flex;flex-wrap:nowrap;gap:10px;align-items:center;justify-content
 #wallet:empty{display:none} #wallet{font-size:12px}
 #connect{padding:7px 12px;font-size:13px;white-space:nowrap}
 header .row{flex-wrap:nowrap;gap:8px}
+.net{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--cy);border:1px solid var(--line);border-radius:99px;padding:2px 9px;white-space:nowrap}
+.net i{width:7px;height:7px;border-radius:50%;background:var(--ok)} .net.bad{color:var(--warn)} .net.bad i{background:var(--warn)}
 h1{font-size:19px;margin:0;letter-spacing:.2px} h1 span{color:var(--cy)}
 h2{font-size:17px;margin:0 0 10px} .mut{color:var(--mut)} .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;word-break:break-all}
 nav{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;background:#0a101d;border-top:1px solid var(--line);padding:4px 4px calc(4px + env(safe-area-inset-bottom,0px))}
@@ -41,7 +43,7 @@ pre{background:#0a1120;border:1px solid var(--line);border-radius:8px;padding:10
 </head>
 <body>
 <header>
-  <h1>Prompt<span>Shield</span></h1>
+  <div class="row" style="margin:0"><h1>Prompt<span>Shield</span></h1><span id="net" class="net"><i></i>Bradbury testnet</span></div>
   <div class="row" style="margin:0"><span id="wallet" class="mut mono"></span><button class="btn ghost" id="connect">Connect wallet</button></div>
 </header>
 <nav id="nav"></nav>
@@ -77,10 +79,33 @@ async function connect() {
   writeClient = createClient({ chain: testnetBradbury, account: addr });
   // Optional helper to add/switch the network; skipped silently if this SDK version lacks it.
   if (typeof writeClient.connect === "function") { try { await writeClient.connect("testnetBradbury"); } catch {} }
-  $("#wallet").textContent = addr.slice(0, 8) + "…" + addr.slice(-6);
-  $("#connect").textContent = "Connected";
+  renderWallet(); await checkNet();
 }
-$("#connect").onclick = () => connect().catch(e => alert(nice(e)));
+function renderWallet() {
+  $("#wallet").textContent = account ? account.slice(0, 6) + "…" + account.slice(-4) : "";
+  $("#connect").textContent = account ? "Disconnect" : "Connect wallet";
+}
+// Shows the network, and warns if the connected wallet is on a different chain.
+async function checkNet() {
+  const el = $("#net"), want = Number(testnetBradbury?.id);
+  let bad = false;
+  if (account && window.ethereum && want) {
+    try { bad = parseInt(await window.ethereum.request({ method: "eth_chainId" }), 16) !== want; } catch {}
+  }
+  el.className = "net" + (bad ? " bad" : "");
+  el.innerHTML = "<i></i>" + (bad ? "Switch wallet to Bradbury" : "Bradbury testnet");
+}
+async function disconnect() {
+  try { await window.ethereum?.request({ method: "wallet_revokePermissions", params: [{ eth_accounts: {} }] }); } catch {}
+  account = null; writeClient = null; renderWallet(); await checkNet();
+}
+$("#connect").onclick = () => (account ? disconnect() : connect()).catch(e => alert(nice(e)));
+window.ethereum?.on?.("accountsChanged", a => {
+  if (!a.length) return disconnect();
+  account = a[0]; writeClient = createClient({ chain: testnetBradbury, account }); renderWallet();
+});
+window.ethereum?.on?.("chainChanged", checkNet);
+renderWallet(); checkNet();
 
 async function write(fn, args, stage) {
   if (!writeClient) await connect();
