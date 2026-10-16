@@ -169,3 +169,49 @@ python -m pytest tests/test_prompt_shield_local.py -v
 - Static rules are pattern-based, so unusual phrasing of an attack can get past them (the AI is the second layer), and some harmless text may be sent to `REVIEW`.
 - Verdicts become final after the network's finalization window; a result is readable once the transaction is accepted.
 - The optional threat feed is only as trustworthy as its URL; only the owner can set it.
+
+## Live dashboard
+
+**https://promptshield-frontend-bice.vercel.app/**
+
+A single-page dashboard that talks directly to the deployed contract on GenLayer Bradbury testnet. Reading works without a wallet. Scanning and verifying send a real transaction from your wallet.
+
+| Tab | What it does |
+|---|---|
+| Overview | Total analyses, plus allowed, blocked and review counts and a risk-level chart for the loaded records |
+| Scan | Sends text to `analyze_prompt` and shows the stored verdict |
+| Guard | Sends a task and a proposed action to `verify_agent_action` |
+| History | Browses stored verdicts with search, a decision filter, load more, and full details with raw JSON |
+| Feed | Shows the contract's threat feed URL; the owner can update it |
+| Guide | Method reference and a code example |
+
+Every number and verdict on the page is read from the contract. Nothing is mocked.
+
+### How to use it
+
+1. Open the link. History and Overview load without a wallet.
+2. To scan or verify, open the link inside the **MetaMask app browser** (or a desktop browser with MetaMask) and tap **Connect wallet**. The header shows the network and warns if your wallet is on a different one.
+3. Add the Bradbury testnet to your wallet and fund the account with test GEN for gas.
+4. Paste text in **Scan** (or a task and an action in **Guard**) and confirm the transaction.
+5. Wait for validators to reach consensus; this can take a few minutes. The verdict appears with its analysis ID, risk level, decision, attack type, static and AI results, requester and input hash.
+
+If the leader validator times out, no verdict is stored and the page says so. Try again.
+
+Notes:
+
+- The dashboard reads the **accepted** state, so a verdict is visible as soon as the transaction is accepted. It becomes final after the network's finalization window.
+- The input limit in the dashboard is 1,200 characters. The contract itself accepts up to 12,000.
+- The Feed tab cannot verify ownership (the contract has no owner view). Only the owner's update transaction succeeds.
+- **ALLOW means no attack was detected. It is not a guarantee that the input is safe.**
+
+### Run it locally
+
+The dashboard is one static file with no build step (`frontend/index.html`). It loads `genlayer-js` from a CDN, so it needs an internet connection.
+
+```bash
+cd frontend
+python -m http.server 8000
+# open http://localhost:8000
+```
+
+To change the contract or network, edit `CONTRACT` and the chain import at the top of the script in `index.html`.
